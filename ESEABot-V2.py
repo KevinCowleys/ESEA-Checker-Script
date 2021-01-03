@@ -72,8 +72,12 @@ def toggleOnlineUsersDB():
         db = client["esea"]
         usersOnlineDB = db.users.find({"online_status": {"$eq" : "online"}})
         for user in usersOnlineDB:
-            print('Updated Online Status of ' + user["alias"])
-            db["users"].update_one(user, { "$set": { "online_status": "offline"}})
+            try:
+                db["users"].update_one(user, { "$set": { "online_status": "offline"}})
+            except:
+                print('ERROR - User status not updated')
+            else:
+                print('Updated Online Status of ' + user["alias"])
 
 # Updates users with current online status
 def updateDBUserStatus():
@@ -101,7 +105,7 @@ def removeUserList(match):
             usersInGameArr.remove(user["id"])
 
 # Gets new user data from ESEA and update their tier status
-def checkTier():
+def checkAllTiers():
     with client:
         db = client["esea"]
         users = db.users.find()
@@ -110,13 +114,39 @@ def checkTier():
 
             # Checks for tier status compared to DB
             if user["tier"] != newUserInf["data"]["tier"]:
-                print('ESEA - Updated tier Status of ' + user["alias"])
-                db["users"].update_one(user, { "$set": { "tier": newUserInf["data"]["tier"]}})
+                try:
+                    db["users"].update_one(user, { "$set": { "tier": newUserInf["data"]["tier"]}})
+                except:
+                    print('ERROR - Updating tier Status of ' + user["alias"])
+                else:
+                    print('ESEA - Updated tier Status of ' + user["alias"])
             
             # Checks for alias compared to DB
             if user["alias"] != newUserInf["data"]["alias"]:
-                print("ESEA - Updated alias of user " + user["alias"] + " to alias: " + newUserInf["data"]["alias"])
-                db["users"].update_one(user, { "$set": { "alias": newUserInf["data"]["alias"]}})
+                try:
+                    db["users"].update_one(user, { "$set": { "alias": newUserInf["data"]["alias"]}})
+                except:
+                    print("ERROR - Updating alias of user " + user["alias"] + " to alias: " + newUserInf["data"]["alias"])
+                else:
+                    print("ESEA - Updated alias of user " + user["alias"] + " to alias: " + newUserInf["data"]["alias"])
+
+# Slows program down a lot, so limited to 4 most recent matches
+def checkTier(userID):
+    with client:
+        db = client["esea"]
+        user = db.users.find_one({"id": {"$eq" : userID}})
+        if user:
+            # Sets it to premium if it's standard
+            # Sub status doesn't matter and will get fixed with Tier checked
+            if user["tier"] == "standard":
+                try:
+                    db["users"].update_one(user, { "$set": { "tier": "premium"}})
+                except:
+                    print("ERROR - Couldn't update tier of " + user["alias"])
+                else:
+                    print("checkTier - updated tier of " + user["alias"])
+        else:
+            print("checkTier - User doesn't exist")
 
 # Fetches match from ESEA servers
 def getMatch(matchID):
@@ -142,13 +172,20 @@ def addMatch(newMatch):
             newMatchC = getMatch(newMatch)
             print(newMatchC)
             print("---------------------------------------------------------------------------------------------------------------------")
-            db["matches"].insert_one(newMatchC)
-            matchesAdded.append(newMatch)
+            try:
+                db["matches"].insert_one(newMatchC)
+            except:
+                print("ERROR - Couldn't insert new match")
+            else:
+                matchesAdded.append(newMatch)
         else:
             if newMatch not in matchesAdded:
                 matchesAdded.append(newMatch)
                 print("match exists, replacing")
-                db["matches"].replace_one(db.matches.find({"data.id": {"$eq" : newMatch}})[0], getMatch(newMatch))
+                try:
+                    db["matches"].replace_one(db.matches.find({"data.id": {"$eq" : newMatch}})[0], getMatch(newMatch))
+                except:
+                    print('ERROR - match not replaced')
 
 # Checks for matches in usersInGameArr and then runs addMatch
 def getMatches():
@@ -176,7 +213,7 @@ def checkMatches():
         db = client["esea"]
         # Limit to 10 most recent matches
         matches = db.matches.find().sort('_id', -1).limit(10)
-        for match in matches:
+        for idx, match in enumerate(matches):
             if match["data"]["completed_at"] is None:
                 print("checkMatches - getting new match info")
                 newMatchInf = getMatch(match["data"]["id"])
@@ -191,22 +228,37 @@ def checkMatches():
                     except:
                         print("User doesn't exist and will be created.")
                         newUser = getUser(user["id"])
-                        db["users"].insert_one({'id': int(newUser["data"]["id"]), 'alias': str(newUser["data"]["alias"]), 'tier': str(newUser["data"]["tier"]), 'online_status': str(newUser["data"]["online_status"])})
-                        
+                        try:
+                            db["users"].insert_one({'id': int(newUser["data"]["id"]), 'alias': str(newUser["data"]["alias"]), 'tier': str(newUser["data"]["tier"]), 'online_status': str(newUser["data"]["online_status"])})
+                        except:
+                            print("ERROR - User not created")
+                    else:
+                        if idx < 3:
+                            checkTier(user["id"])
+
                 for user in match["data"]["team_2"]["players"]:
                     try:
                         db["users"].find({"id": {"$eq" : user["id"]}})[0]
                     except:
                         print("User doesn't exist and will be created.")
                         newUser = getUser(user["id"])
-                        db["users"].insert_one({'id': int(newUser["data"]["id"]), 'alias': str(newUser["data"]["alias"]), 'tier': str(newUser["data"]["tier"]), 'online_status': str(newUser["data"]["online_status"])})
+                        try:
+                            db["users"].insert_one({'id': int(newUser["data"]["id"]), 'alias': str(newUser["data"]["alias"]), 'tier': str(newUser["data"]["tier"]), 'online_status': str(newUser["data"]["online_status"])})
+                        except:
+                            print("ERROR - User not created")
+                    else:
+                        if idx < 3:
+                            checkTier(user["id"])
 
 # Updates the last time a section has been updated
 def updateTime(updateField):
     with client:
         db = client["esea"]
         status = db["status"].find()
-        db["status"].update_one(status[0],{"$set": { updateField: datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")}})
+        try:
+            db["status"].update_one(status[0],{"$set": { updateField: datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")}})
+        except:
+            print("ERROR - status not updated")
 
 # Threads to have them run at a random time
 def threadMatches():
@@ -243,14 +295,17 @@ def threadUsers():
 def threadTiers():
     while True:
         print("threadTiers - Started")
-        checkTier()
+        checkAllTiers()
         updateTime("tiers")
         print("threadTiers - Done")
         time.sleep(432000)
 
+# addMatch()
+
 threading.Timer(1, threadMatches).start()
 threading.Timer(1, threadUsers).start()
 threading.Timer(432000, threadTiers).start()
+
 
 # with client:
 #     db = client["esea"]
